@@ -2,6 +2,7 @@ name: SOX AI Auditor
 on:
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch: # This allows you to run it manually!
 
 permissions:
   contents: read
@@ -16,47 +17,53 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip' # This helps keep the environment stable
+
+      - name: Install Google AI
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install google-generativeai
+          # This line tells us exactly where it was installed
+          echo "PYTHONPATH=$(python -c 'import site; print(site.getsitepackages()[0])')" >> $GITHUB_ENV
+
       - name: Run AI Audit
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        shell: python
         run: |
-            import os
-            import subprocess
-            import sys
+          python - <<EOF
+          import os
+          import subprocess
+          import sys
+          
+          # Force the script to see the installed library
+          try:
+              import google.generativeai as genai
+              print("✅ SUCCESS: Library found!")
+          except ImportError:
+              print("❌ STILL MISSING: Re-installing inside script...")
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "google-generativeai"])
+              import google.generativeai as genai
 
-            # 1. THE FORCE-FEED: Install the library directly into the current process
-            print("Installing Google AI library...")
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "google-generativeai"])
-            
-            # 2. NOW we can import it
-            import google.generativeai as genai
-            print("✅ Library successfully imported!")
+          # Setup AI
+          genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+          model = genai.GenerativeModel('gemini-1.5-flash')
 
-            try:
-                # 3. Setup AI
-                genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-                model = genai.GenerativeModel('gemini-1.5-flash')
+          # Get Diff
+          diff = subprocess.check_output(['git', 'diff', 'origin/main...HEAD'], text=True)
+          
+          # Audit
+          prompt = f"Identify if these changes are Functional or Non-Functional for SOX:\n\n{diff}"
+          response = model.generate_content(prompt)
+          
+          with open("ai_report.txt", "w") as f:
+              f.write(f"### 🛡️ SOX Audit Result\n\n{response.text}")
+          EOF
 
-                # 4. Get the Diff
-                diff_proc = subprocess.run(['git', 'diff', 'origin/main...HEAD'], capture_output=True, text=True)
-                diff_content = diff_proc.stdout if diff_proc.stdout else "No logic changes detected."
-
-                # 5. The Prompt
-                prompt = f"Identify if these code changes are Functional or Non-Functional for SOX compliance:\n\n{diff_content}"
-
-                # 6. Generate and Save
-                response = model.generate_content(prompt)
-                with open("ai_report.txt", "w") as f:
-                    f.write(f"### 🛡️ SOX Audit Result\n\n{response.text}")
-                print("✅ Audit complete!")
-
-            except Exception as e:
-                with open("ai_report.txt", "w") as f:
-                    f.write(f"### ❌ API Error\n\nCheck if your GEMINI_API_KEY is correct. Error: {str(e)}")
-                print(f"❌ Error: {e}")
-
-      - name: Post AI Comment
+      - name: Post Comment
         uses: mshick/add-pr-comment@v2
         with:
           message-path: ai_report.txt
