@@ -16,6 +16,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      # --- THIS IS THE NEW CRITICAL STEP ---
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10' 
+
+      - name: Install AI Libraries
+        run: |
+          python -m pip install --upgrade pip
+          pip install google-generativeai
+      # -------------------------------------
+
       - name: Run AI Audit
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -23,26 +35,20 @@ jobs:
         run: |
             import os
             import subprocess
-            import sys
-
-            # 1. Force install the library INSIDE the script
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "google-generativeai"])
-            
             import google.generativeai as genai
 
-            # 2. Setup AI
+            # 1. Setup AI
             genai.configure(api_key=os.environ["GEMINI_API_KEY"])
             model = genai.GenerativeModel('gemini-1.5-flash')
 
-            # 3. Get the Diff
-            # We run a system command to get the changes
+            # 2. Get the Diff using Git
             diff_proc = subprocess.run(['git', 'diff', 'origin/main...HEAD'], capture_output=True, text=True)
             diff_content = diff_proc.stdout if diff_proc.stdout else "No logic changes detected."
 
-            # 4. The Prompt
+            # 3. The Auditor Prompt
             prompt = f"Identify if these code changes are Functional or Non-Functional for SOX compliance:\n\n{diff_content}"
 
-            # 5. Generate and Save
+            # 4. Generate and Save
             response = model.generate_content(prompt)
             with open("ai_report.txt", "w") as f:
                 f.write(f"### 🛡️ SOX Audit Result\n\n{response.text}")
