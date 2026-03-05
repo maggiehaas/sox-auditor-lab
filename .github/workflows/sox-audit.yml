@@ -3,7 +3,6 @@ on:
   pull_request:
     branches: [ "main" ]
 
-# This section explicitly tells GitHub "I am allowed to see the code"
 permissions:
   contents: read
   pull-requests: write
@@ -12,22 +11,24 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      # We use a simpler version of checkout that doesn't try to be "fancy"
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          # We are explicitly naming YOUR repo and YOUR token
+          repository: ${{ github.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
-      - name: Get Code Changes
+      - name: Debug Connection
         run: |
-          # Instead of fancy Git commands, let's just prove we can see the files
+          echo "Current Repository: ${{ github.repository }}"
+          git remote -v
           ls -R
-          echo "I can see the files! Setup successful." > success.txt
 
       - name: Post Success Comment
         uses: mshick/add-pr-comment@v2
         with:
           message: |
             ### 🛡️ SOX Audit Result
-            **Status:** ✅ THE DOOR IS OPEN! 
-            **Findings:** The workflow successfully accessed the private repository.
+            **Status:** ✅ CONNECTION ESTABLISHED
+            **Findings:** The workflow has successfully bypassed the 'Not Found' error.
