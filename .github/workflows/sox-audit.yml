@@ -16,17 +16,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install AI Libraries
+        run: |
+          python -m pip install --upgrade pip
+          pip install google-generativeai
+
       - name: Get Code Changes
         id: diff
         run: |
           git diff origin/main...HEAD > changes.diff
-          # Save the diff to an environment variable so Python can read it
-          echo "PR_DIFF<<EOF" >> $GITHUB_ENV
-          cat changes.diff >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          # We'll read the file directly in Python to avoid environment variable limits
+          echo "Diff captured."
 
       - name: AI Analysis
-        id: ai
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         shell: python
@@ -38,8 +40,14 @@ jobs:
             genai.configure(api_key=os.environ["GEMINI_API_KEY"])
             model = genai.GenerativeModel('gemini-1.5-flash')
 
-            # 2. Prepare the Auditor Prompt
-            diff_content = os.environ["PR_DIFF"]
+            # 2. Read the diff file
+            if os.path.exists("changes.diff"):
+                with open("changes.diff", "r") as f:
+                    diff_content = f.read()
+            else:
+                diff_content = "No changes detected."
+
+            # 3. Prepare the Auditor Prompt
             prompt = f"""
             You are a SOX Compliance Auditor. Analyze this code change:
             
@@ -52,10 +60,10 @@ jobs:
             Format your response in Markdown with a '🛡️ SOX Audit' header.
             """
 
-            # 3. Get the result
+            # 4. Get the result
             response = model.generate_content(prompt)
             
-            # 4. Save result for the next step
+            # 5. Save result to a file
             with open("ai_report.txt", "w") as f:
                 f.write(response.text)
 
