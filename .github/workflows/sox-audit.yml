@@ -14,21 +14,52 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # We are explicitly naming YOUR repo and YOUR token
-          repository: ${{ github.repository }}
-          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Debug Connection
+      - name: Get Code Changes
+        id: diff
         run: |
-          echo "Current Repository: ${{ github.repository }}"
-          git remote -v
-          ls -R
+          git diff origin/main...HEAD > changes.diff
+          # Save the diff to an environment variable so Python can read it
+          echo "PR_DIFF<<EOF" >> $GITHUB_ENV
+          cat changes.diff >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
-      - name: Post Success Comment
+      - name: AI Analysis
+        id: ai
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        shell: python
+        run: |
+            import os
+            import google.generativeai as genai
+
+            # 1. Setup the AI
+            genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+            model = genai.GenerativeModel('gemini-1.5-flash')
+
+            # 2. Prepare the Auditor Prompt
+            diff_content = os.environ["PR_DIFF"]
+            prompt = f"""
+            You are a SOX Compliance Auditor. Analyze this code change:
+            
+            {diff_content}
+
+            1. Is this 'Functional' (logic/math/security) or 'Non-Functional' (comments/formatting)?
+            2. What is the risk level (Low/Medium/High) for financial reporting?
+            3. Provide a 2-sentence summary for a human reviewer.
+            
+            Format your response in Markdown with a '🛡️ SOX Audit' header.
+            """
+
+            # 3. Get the result
+            response = model.generate_content(prompt)
+            
+            # 4. Save result for the next step
+            with open("ai_report.txt", "w") as f:
+                f.write(response.text)
+
+      - name: Post AI Comment
         uses: mshick/add-pr-comment@v2
         with:
-          message: |
-            ### 🛡️ SOX Audit Result
-            **Status:** ✅ CONNECTION ESTABLISHED
-            **Findings:** The workflow has successfully bypassed the 'Not Found' error.
+          message-path: ai_report.txt
