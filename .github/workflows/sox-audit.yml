@@ -2,7 +2,6 @@ name: SOX AI Auditor
 on:
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch: # This allows you to run it manually!
 
 permissions:
   contents: read
@@ -21,14 +20,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip' # This helps keep the environment stable
+          # We removed the 'cache' line that caused the error!
 
       - name: Install Google AI
         run: |
           python -m pip install --upgrade pip
           python -m pip install google-generativeai
-          # This line tells us exactly where it was installed
-          echo "PYTHONPATH=$(python -c 'import site; print(site.getsitepackages()[0])')" >> $GITHUB_ENV
 
       - name: Run AI Audit
         env:
@@ -38,29 +35,39 @@ jobs:
           import os
           import subprocess
           import sys
-          
-          # Force the script to see the installed library
+          import google.generativeai as genai
+
+          print("--- Starting AI Audit ---")
+
           try:
-              import google.generativeai as genai
-              print("✅ SUCCESS: Library found!")
-          except ImportError:
-              print("❌ STILL MISSING: Re-installing inside script...")
-              subprocess.check_call([sys.executable, "-m", "pip", "install", "google-generativeai"])
-              import google.generativeai as genai
+              # 1. Setup AI
+              genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+              model = genai.GenerativeModel('gemini-1.5-flash')
 
-          # Setup AI
-          genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-          model = genai.GenerativeModel('gemini-1.5-flash')
+              # 2. Get the Diff
+              # We use the SHAs to be 100% safe
+              base_sha = "${{ github.event.pull_request.base.sha }}"
+              head_sha = "${{ github.event.pull_request.head.sha }}"
+              diff = subprocess.check_output(['git', 'diff', base_sha, head_sha], text=True)
+              
+              if not diff:
+                  diff = "No code changes detected (maybe only file renames)."
 
-          # Get Diff
-          diff = subprocess.check_output(['git', 'diff', 'origin/main...HEAD'], text=True)
-          
-          # Audit
-          prompt = f"Identify if these changes are Functional or Non-Functional for SOX:\n\n{diff}"
-          response = model.generate_content(prompt)
-          
-          with open("ai_report.txt", "w") as f:
-              f.write(f"### 🛡️ SOX Audit Result\n\n{response.text}")
+              # 3. The Auditor Prompt
+              prompt = f"Identify if these code changes are Functional or Non-Functional for SOX compliance. Summarize in 2 sentences:\n\n{diff}"
+
+              # 4. Generate and Save
+              print("Communicating with Gemini...")
+              response = model.generate_content(prompt)
+              
+              with open("ai_report.txt", "w") as f:
+                  f.write(f"### 🛡️ SOX Audit Result\n\n{response.text}")
+              print("✅ Audit complete!")
+
+          except Exception as e:
+              with open("ai_report.txt", "w") as f:
+                  f.write(f"### ❌ Audit Failed\n\nError: {str(e)}")
+              print(f"❌ Error: {e}")
           EOF
 
       - name: Post Comment
