@@ -16,60 +16,47 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Force Install and Run
+      - name: Run AI Audit
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        shell: python
         run: |
-          # 1. Find the exact path of Python on this machine
-          PYTHON_PATH=$(which python3)
-          echo "Using Python at: $PYTHON_PATH"
-          
-          # 2. Use that EXACT Python to install the library
-          $PYTHON_PATH -m pip install --user google-generativeai
-          
-          # 3. Tell Python where to find the newly installed library
-          export PYTHONPATH=$PYTHONPATH:$(python3 -m site --user-site)
-          
-          # 4. Run the script using that EXACT same Python path
-          $PYTHON_PATH - <<EOF
-          import os
-          import subprocess
-          import sys
-          
-          # Add the user-site to the path just in case
-          import site
-          sys.path.append(site.getusersitepackages())
+            import os
+            import subprocess
+            import sys
 
-          try:
-              import google.generativeai as genai
-              print("✅ Library successfully imported!")
-              
-              genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-              model = genai.GenerativeModel('gemini-1.5-flash')
+            # 1. THE FORCE-FEED: Install the library directly into the current process
+            print("Installing Google AI library...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "google-generativeai"])
+            
+            # 2. NOW we can import it
+            import google.generativeai as genai
+            print("✅ Library successfully imported!")
 
-              # Get the Diff
-              diff_proc = subprocess.run(['git', 'diff', 'origin/main...HEAD'], capture_output=True, text=True)
-              diff_content = diff_proc.stdout if diff_proc.stdout else "No logic changes detected."
+            try:
+                # 3. Setup AI
+                genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+                model = genai.GenerativeModel('gemini-1.5-flash')
 
-              # The Prompt
-              prompt = f"Identify if these code changes are Functional or Non-Functional for SOX compliance:\n\n{diff_content}"
+                # 4. Get the Diff
+                diff_proc = subprocess.run(['git', 'diff', 'origin/main...HEAD'], capture_output=True, text=True)
+                diff_content = diff_proc.stdout if diff_proc.stdout else "No logic changes detected."
 
-              response = model.generate_content(prompt)
-              
-              with open("ai_report.txt", "w") as f:
-                  f.write(f"### 🛡️ SOX Audit Result\n\n{response.text}")
-                  
-          except ImportError:
-              print("❌ Still missing the library. Printing installed packages:")
-              subprocess.run([sys.executable, "-m", "pip", "list"])
-              with open("ai_report.txt", "w") as f:
-                  f.write("### ❌ Audit Failed\n\nLibrary not found.")
-          except Exception as e:
-              with open("ai_report.txt", "w") as f:
-                  f.write(f"### ❌ API Error\n\n{str(e)}")
-          EOF
+                # 5. The Prompt
+                prompt = f"Identify if these code changes are Functional or Non-Functional for SOX compliance:\n\n{diff_content}"
 
-      - name: Post Comment
+                # 6. Generate and Save
+                response = model.generate_content(prompt)
+                with open("ai_report.txt", "w") as f:
+                    f.write(f"### 🛡️ SOX Audit Result\n\n{response.text}")
+                print("✅ Audit complete!")
+
+            except Exception as e:
+                with open("ai_report.txt", "w") as f:
+                    f.write(f"### ❌ API Error\n\nCheck if your GEMINI_API_KEY is correct. Error: {str(e)}")
+                print(f"❌ Error: {e}")
+
+      - name: Post AI Comment
         uses: mshick/add-pr-comment@v2
         with:
           message-path: ai_report.txt
