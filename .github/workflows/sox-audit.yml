@@ -3,27 +3,31 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# This section explicitly tells GitHub "I am allowed to see the code"
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   audit:
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
     steps:
+      # We use a simpler version of checkout that doesn't try to be "fancy"
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Downloads all history
+          persist-credentials: false
 
       - name: Get Code Changes
         run: |
-          # We use the specific Commit IDs provided by the PR event itself
-          git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} > changes.diff
-          echo "Diff captured successfully."
+          # Instead of fancy Git commands, let's just prove we can see the files
+          ls -R
+          echo "I can see the files! Setup successful." > success.txt
 
-      - name: Post Mock Result
+      - name: Post Success Comment
         uses: mshick/add-pr-comment@v2
         with:
           message: |
             ### 🛡️ SOX Audit Result
-            **Status:** ✅ Workflow Running Perfectly
-            **Findings:** I can now see your code changes. Ready for the real AI!
+            **Status:** ✅ THE DOOR IS OPEN! 
+            **Findings:** The workflow successfully accessed the private repository.
