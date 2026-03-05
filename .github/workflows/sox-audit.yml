@@ -16,44 +16,49 @@ jobs:
         with:
           fetch-depth: 0
 
-      # --- THIS IS THE NEW CRITICAL STEP ---
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10' 
-
-      - name: Install AI Libraries
-        run: |
-          python -m pip install --upgrade pip
-          pip install google-generativeai
-      # -------------------------------------
-
-      - name: Run AI Audit
+      - name: Install and Run AI Audit
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        shell: python
         run: |
-            import os
-            import subprocess
-            import google.generativeai as genai
+          # 1. Install the library
+          python -m pip install --upgrade pip
+          python -m pip install google-generativeai
+          
+          # 2. Run the actual Audit Script
+          python - <<EOF
+          import os
+          import subprocess
+          import google.generativeai as genai
 
-            # 1. Setup AI
-            genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-            model = genai.GenerativeModel('gemini-1.5-flash')
+          print("--- Starting AI Analysis ---")
 
-            # 2. Get the Diff using Git
-            diff_proc = subprocess.run(['git', 'diff', 'origin/main...HEAD'], capture_output=True, text=True)
-            diff_content = diff_proc.stdout if diff_proc.stdout else "No logic changes detected."
+          try:
+              # Setup AI
+              genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+              model = genai.GenerativeModel('gemini-1.5-flash')
 
-            # 3. The Auditor Prompt
-            prompt = f"Identify if these code changes are Functional or Non-Functional for SOX compliance:\n\n{diff_content}"
+              # Get the Diff
+              diff_proc = subprocess.run(['git', 'diff', 'origin/main...HEAD'], capture_output=True, text=True)
+              diff_content = diff_proc.stdout if diff_proc.stdout else "No logic changes detected."
 
-            # 4. Generate and Save
-            response = model.generate_content(prompt)
-            with open("ai_report.txt", "w") as f:
-                f.write(f"### 🛡️ SOX Audit Result\n\n{response.text}")
+              # The Prompt
+              prompt = f"Identify if these code changes are Functional or Non-Functional for SOX compliance. Summarize in 2 sentences:\n\n{diff_content}"
 
-      - name: Post AI Comment
+              # Generate
+              print("Sending request to Gemini...")
+              response = model.generate_content(prompt)
+              
+              with open("ai_report.txt", "w") as f:
+                  f.write(f"### 🛡️ SOX Audit Result\n\n{response.text}")
+              print("Success: Report generated.")
+
+          except Exception as e:
+              with open("ai_report.txt", "w") as f:
+                  f.write(f"### ❌ Audit Failed\n\nError: {str(e)}")
+              print(f"Error occurred: {e}")
+          EOF
+
+      - name: Post Comment
         uses: mshick/add-pr-comment@v2
         with:
           message-path: ai_report.txt
