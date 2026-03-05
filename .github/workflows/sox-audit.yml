@@ -1,4 +1,33 @@
-- name: Run AI Audit
+name: SOX AI Auditor
+on:
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Google AI
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install google-generativeai
+
+      - name: Run AI Audit
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
@@ -8,30 +37,39 @@
           import time
           import google.generativeai as genai
 
-          # Setup
+          # 1. Setup
           genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-          model = genai.GenerativeModel('gemini-2.0-flash')
+          # Using 1.5-flash as it's often more stable for free-tier quotas
+          model = genai.GenerativeModel('gemini-1.5-flash')
 
-          def run_audit():
-              base_sha = "${{ github.event.pull_request.base.sha }}"
-              head_sha = "${{ github.event.pull_request.head.sha }}"
-              diff = subprocess.check_output(['git', 'diff', base_sha, head_sha], text=True)
-              prompt = f"Analyze these changes for SOX compliance. Is it Functional or Non-Functional? Summarize in 2 sentences:\n\n{diff}"
-              
-              # Retry logic for 429 errors
-              for i in range(3):
-                  try:
-                      return model.generate_content(prompt).text
-                  except Exception as e:
-                      if "429" in str(e) and i < 2:
-                          print(f"Rate limit hit. Retrying in 30s...")
-                          time.sleep(30)
-                      else:
-                          return f"⚠️ **AI Audit Delayed:** The AI is currently at capacity. Please re-run this check in a few minutes.\n\n*Error Detail: {str(e)}*"
+          def get_audit():
+              try:
+                  # Capture the changes
+                  diff = subprocess.check_output(['git', 'diff', 'origin/main...HEAD'], text=True)
+                  if not diff.strip():
+                      return "No logic changes detected in this Pull Request."
 
-          result = run_audit()
+                  prompt = f"Analyze these changes for SOX compliance. Is it 'Functional' or 'Non-Functional'? Summarize the financial risk in 2 sentences:\n\n{diff}"
+                  
+                  # 2. RESILIENT RETRY LOOP
+                  for attempt in range(3):
+                      try:
+                          print(f"Attempting AI Analysis (Try {attempt + 1})...")
+                          response = model.generate_content(prompt)
+                          return response.text
+                      except Exception as e:
+                          if "429" in str(e) and attempt < 2:
+                              print("⚠️ Rate limit hit. Cooling down for 65 seconds...")
+                              time.sleep(65) 
+                          else:
+                              raise e
+              except Exception as e:
+                  return f"⚠️ **Audit could not be completed.**\n\nError: {str(e)}"
+
+          # 3. Save and Exit
+          report = get_audit()
           with open("ai_report.txt", "w") as f:
-              f.write(f"### 🛡️ SOX Audit Result\n\n{result}")
+              f.write(f"### 🛡️ SOX Audit Result\n\n{report}")
           EOF
 
       - name: Post Comment
