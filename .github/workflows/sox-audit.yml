@@ -16,24 +16,34 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install and Run AI Audit
+      - name: Force Install and Run
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # 1. Install the library
-          python -m pip install --upgrade pip
-          python -m pip install google-generativeai
+          # 1. Find the exact path of Python on this machine
+          PYTHON_PATH=$(which python3)
+          echo "Using Python at: $PYTHON_PATH"
           
-          # 2. Run the actual Audit Script
-          python - <<EOF
+          # 2. Use that EXACT Python to install the library
+          $PYTHON_PATH -m pip install --user google-generativeai
+          
+          # 3. Tell Python where to find the newly installed library
+          export PYTHONPATH=$PYTHONPATH:$(python3 -m site --user-site)
+          
+          # 4. Run the script using that EXACT same Python path
+          $PYTHON_PATH - <<EOF
           import os
           import subprocess
-          import google.generativeai as genai
-
-          print("--- Starting AI Analysis ---")
+          import sys
+          
+          # Add the user-site to the path just in case
+          import site
+          sys.path.append(site.getusersitepackages())
 
           try:
-              # Setup AI
+              import google.generativeai as genai
+              print("✅ Library successfully imported!")
+              
               genai.configure(api_key=os.environ["GEMINI_API_KEY"])
               model = genai.GenerativeModel('gemini-1.5-flash')
 
@@ -42,20 +52,21 @@ jobs:
               diff_content = diff_proc.stdout if diff_proc.stdout else "No logic changes detected."
 
               # The Prompt
-              prompt = f"Identify if these code changes are Functional or Non-Functional for SOX compliance. Summarize in 2 sentences:\n\n{diff_content}"
+              prompt = f"Identify if these code changes are Functional or Non-Functional for SOX compliance:\n\n{diff_content}"
 
-              # Generate
-              print("Sending request to Gemini...")
               response = model.generate_content(prompt)
               
               with open("ai_report.txt", "w") as f:
                   f.write(f"### 🛡️ SOX Audit Result\n\n{response.text}")
-              print("Success: Report generated.")
-
+                  
+          except ImportError:
+              print("❌ Still missing the library. Printing installed packages:")
+              subprocess.run([sys.executable, "-m", "pip", "list"])
+              with open("ai_report.txt", "w") as f:
+                  f.write("### ❌ Audit Failed\n\nLibrary not found.")
           except Exception as e:
               with open("ai_report.txt", "w") as f:
-                  f.write(f"### ❌ Audit Failed\n\nError: {str(e)}")
-              print(f"Error occurred: {e}")
+                  f.write(f"### ❌ API Error\n\n{str(e)}")
           EOF
 
       - name: Post Comment
