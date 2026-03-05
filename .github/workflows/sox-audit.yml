@@ -16,56 +16,36 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install AI Libraries
-        run: |
-          python -m pip install --upgrade pip
-          pip install google-generativeai
-
-      - name: Get Code Changes
-        id: diff
-        run: |
-          git diff origin/main...HEAD > changes.diff
-          # We'll read the file directly in Python to avoid environment variable limits
-          echo "Diff captured."
-
-      - name: AI Analysis
+      - name: Run AI Audit
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         shell: python
         run: |
             import os
+            import subprocess
+            import sys
+
+            # 1. Force install the library INSIDE the script
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "google-generativeai"])
+            
             import google.generativeai as genai
 
-            # 1. Setup the AI
+            # 2. Setup AI
             genai.configure(api_key=os.environ["GEMINI_API_KEY"])
             model = genai.GenerativeModel('gemini-1.5-flash')
 
-            # 2. Read the diff file
-            if os.path.exists("changes.diff"):
-                with open("changes.diff", "r") as f:
-                    diff_content = f.read()
-            else:
-                diff_content = "No changes detected."
+            # 3. Get the Diff
+            # We run a system command to get the changes
+            diff_proc = subprocess.run(['git', 'diff', 'origin/main...HEAD'], capture_output=True, text=True)
+            diff_content = diff_proc.stdout if diff_proc.stdout else "No logic changes detected."
 
-            # 3. Prepare the Auditor Prompt
-            prompt = f"""
-            You are a SOX Compliance Auditor. Analyze this code change:
-            
-            {diff_content}
+            # 4. The Prompt
+            prompt = f"Identify if these code changes are Functional or Non-Functional for SOX compliance:\n\n{diff_content}"
 
-            1. Is this 'Functional' (logic/math/security) or 'Non-Functional' (comments/formatting)?
-            2. What is the risk level (Low/Medium/High) for financial reporting?
-            3. Provide a 2-sentence summary for a human reviewer.
-            
-            Format your response in Markdown with a '🛡️ SOX Audit' header.
-            """
-
-            # 4. Get the result
+            # 5. Generate and Save
             response = model.generate_content(prompt)
-            
-            # 5. Save result to a file
             with open("ai_report.txt", "w") as f:
-                f.write(response.text)
+                f.write(f"### 🛡️ SOX Audit Result\n\n{response.text}")
 
       - name: Post AI Comment
         uses: mshick/add-pr-comment@v2
